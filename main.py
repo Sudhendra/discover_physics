@@ -10,6 +10,8 @@ Phase 1: Digital Bedrock
 # Standard library imports
 import argparse
 import time
+import yaml
+from pathlib import Path
 from typing import Optional
 
 # Third-party imports
@@ -17,6 +19,9 @@ import numpy as np
 
 # Local imports
 from src.environment.puffer_wrapper import LuxEnvironment
+from src.agent.perception import PerceptionBuffer
+from src.agent.theorist import Theorist
+from src.agent.navigator import Navigator
 
 
 def phase1_visualization(render: bool = True, steps: int = 100):
@@ -133,6 +138,115 @@ def phase2_data_collection(steps: int = 500, save_csv: bool = False):
     return data
 
 
+def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: bool = False):
+    """Phase 2: The Loop - Integrate Scientist Engine.
+    
+    Connects the perception buffer with PySR symbolic regression.
+    Runs random walk while periodically outputting hypothesis equations.
+    
+    Args:
+        steps: Number of simulation steps
+        update_freq: Steps between PySR regression updates
+        render: Show MuJoCo visualization
+    """
+    print("=" * 60)
+    print("PHASE 2: The Loop - Scientist Engine Integration")
+    print("=" * 60)
+    
+    # Load configuration
+    config_path = Path("config/agent_params.yaml")
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        print("✓ Loaded configuration from config/agent_params.yaml")
+    else:
+        config = {}
+        print("⚠  No config file, using defaults")
+    
+    # Initialize components
+    print("\n[1/5] Initializing Scientist Engine...")
+    render_mode = "human" if render else None
+    env = LuxEnvironment(render_mode=render_mode, max_ticks=10000)
+    buffer = PerceptionBuffer(max_size=config.get('perception', {}).get('max_buffer_size', 2000))
+    theorist = Theorist(config=config.get('pysr', {}))
+    navigator = Navigator(mode="random")
+    
+    print(f"  ✓ Environment: MuJoCo (render={'ON' if render else 'OFF'})")
+    print(f"  ✓ Buffer: max_size={buffer.max_size}")
+    print(f"  ✓ Theorist: PySR ready")
+    print(f"  ✓ Navigator: {navigator.mode} mode")
+    
+    # Reset environment
+    print("\n[2/5] Starting exploration...")
+    obs, _ = env.reset(seed=42)
+    buffer.add_observation(obs)
+    
+    print(f"  Initial position: ({obs[0]:.2f}, {obs[1]:.2f}), lux: {obs[2]:.2f}")
+    
+    # Main loop
+    print(f"\n[3/5] Running {steps} steps with PySR updates every {update_freq} steps...")
+    
+    for step in range(steps):
+        # Get action from navigator
+        action = navigator.get_action()
+        
+        # Take step
+        obs, reward, terminated, truncated, info = env.step(action)
+        
+        # Store observation
+        buffer.add_observation(obs)
+        
+        # Periodic updates
+        if (step + 1) % update_freq == 0:
+            print(f"\n  Step {step + 1}/{steps}:")
+            print(f"    Buffer: {buffer.size()} samples")
+            print(f"    Position: ({obs[0]:.2f}, {obs[1]:.2f}), Lux: {obs[2]:.2f}")
+            
+            # Attempt symbolic regression if enough samples
+            if buffer.size() >= theorist.min_samples:
+                distances, intensities = buffer.get_distance_intensity_pairs(source_pos=(0, 0))
+                
+                print(f"    Running PySR on {len(distances)} samples...")
+                success = theorist.fit(distances, intensities)
+                
+                if success:
+                    summary = theorist.get_hypothesis_summary()
+                    print(f"    Current Hypothesis: {summary['equation']}")
+                    print(f"    R² = {summary['r_squared']:.4f}, Complexity = {summary['complexity']}")
+            else:
+                print(f"    Waiting for {theorist.min_samples} samples before PySR...")
+        
+        # Small delay if rendering
+        if render:
+            time.sleep(0.01)
+    
+    # Final analysis
+    print("\n[4/5] Final Analysis...")
+    stats = buffer.get_statistics()
+    print(f"  ✓ Collected {stats['size']} observations")
+    print(f"  Position coverage: x=[{stats['x_mean']:.2f}±{stats['x_std']:.2f}]m")
+    print(f"  Position coverage: y=[{stats['y_mean']:.2f}±{stats['y_std']:.2f}]m")
+    print(f"  Lux range: [{stats['lux_min']:.2f}, {stats['lux_max']:.2f}]")
+    
+    print(f"\n  Final Hypothesis: {theorist}")
+    
+    # Check if hypothesis is good enough
+    if theorist.has_good_hypothesis():
+        print(f"\n  🎉 Strong hypothesis found! Ready for Phase 3 (LLM validation)")
+    else:
+        print(f"\n  📊 Need more data or better exploration for strong hypothesis")
+    
+    # Cleanup
+    print("\n[5/5] Cleanup...")
+    env.close()
+    
+    print("\n" + "=" * 60)
+    print("Phase 2 Complete! Scientist engine is working.")
+    print("=" * 60)
+    
+    return buffer, theorist
+
+
 def main():
     """Main entry point with phase selection."""
     parser = argparse.ArgumentParser(
@@ -143,12 +257,12 @@ def main():
         type=int,
         default=1,
         choices=[1, 2, 3],
-        help='Execution phase: 1=Visualization, 2=Data Collection, 3=Active Inference (future)'
+        help='Execution phase: 1=Visualization, 2=Scientist Loop, 3=Active Inference (future)'
     )
     parser.add_argument(
         '--render',
         action='store_true',
-        help='Show PyBullet GUI visualization'
+        help='Show MuJoCo viewer visualization'
     )
     parser.add_argument(
         '--steps',
@@ -157,9 +271,15 @@ def main():
         help='Number of simulation steps'
     )
     parser.add_argument(
+        '--update-freq',
+        type=int,
+        default=100,
+        help='Steps between PySR updates (Phase 2)'
+    )
+    parser.add_argument(
         '--save-csv',
         action='store_true',
-        help='Save collected data to CSV (Phase 2)'
+        help='Save collected data to CSV'
     )
     
     args = parser.parse_args()
@@ -167,7 +287,7 @@ def main():
     if args.phase == 1:
         phase1_visualization(render=args.render, steps=args.steps)
     elif args.phase == 2:
-        phase2_data_collection(steps=args.steps, save_csv=args.save_csv)
+        phase2_scientist_loop(steps=args.steps, update_freq=args.update_freq, render=args.render)
     elif args.phase == 3:
         print("Phase 3 (Active Inference) - Coming soon!")
         print("This will include:")

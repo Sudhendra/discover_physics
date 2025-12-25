@@ -7,8 +7,8 @@ gymnasium>=0.29.0
 # PufferLib for vectorization
 pufferlib>=0.7.0
 
-# Symbolic Regression (optional for Phase 1, required for Phase 2+)
-# pysr>=0.16.0
+# Symbolic Regression (required for Phase 2+)
+pysr>=0.16.0
 
 # LLM Integration (optional for Phase 1, required for Phase 3)
 # litellm>=1.0.0

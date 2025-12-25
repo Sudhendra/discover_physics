@@ -1,0 +1,35 @@
+# Lux Scientia - Agent Configuration
+# PySR hyperparameters and curiosity controller settings
+
+# Symbolic Regression (PySR) Configuration
+pysr:
+  binary_operators: ["+", "-", "*", "/"]
+  unary_operators: ["square", "inv"]  # Key for discovering 1/d^2
+  complexity_of_operators:
+    square: 1
+    inv: 1
+  complexity_of_constants: 1
+  parsimony: 0.1  # High complexity penalty - prefer simple equations
+  niterations: 40  # Number of evolution iterations
+  populations: 15  # Number of populations for genetic algorithm
+  population_size: 50
+  maxsize: 15  # Maximum equation complexity
+  ncycles_per_iteration: 500
+  verbosity: 0  # Silent mode (0), or verbose (1)
+  
+# Curiosity Controller Configuration
+curiosity:
+  surprise_threshold: 0.15  # Threshold for entering Science Mode
+  science_mode_samples: 5   # Number of nearby samples in Science Mode
+  sample_radius: 0.10       # Radius in meters for Science Mode sampling
+  min_samples_for_fit: 50   # Minimum buffer size before attempting regression
+  
+# Perception Buffer Configuration
+perception:
+  max_buffer_size: 2000     # Maximum observations to store
+  update_frequency: 50      # Steps between PySR updates
+  
+# Discovery Criteria (for LLM validation)
+discovery:
+  min_r_squared: 0.90       # Minimum R² for hypothesis
+  max_complexity: 10        # Maximum allowed equation complexity
