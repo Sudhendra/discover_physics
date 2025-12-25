@@ -2,7 +2,7 @@
 Lux Scientia - Main Entry Point
 
 Phase 1: Digital Bedrock
-- Visualize the rover moving in PyBullet
+- Visualize the rover moving in MuJoCo
 - Collect noisy sensor data
 - Verify the simulation works correctly
 """
@@ -32,8 +32,9 @@ def phase1_visualization(render: bool = True, steps: int = 100):
     
     # Create environment
     print("\n[1/4] Creating environment...")
-    env = LuxEnvironment(render=render, max_ticks=500)
-    print(f"✓ Environment created (render={'ON' if render else 'OFF'})")
+    render_mode = "human" if render else None
+    env = LuxEnvironment(render_mode=render_mode, max_ticks=500)
+    print(f"✓ MuJoCo environment created (render={'ON' if render else 'OFF'})")
     
     # Reset environment
     print("\n[2/4] Resetting environment...")
@@ -95,7 +96,7 @@ def phase2_data_collection(steps: int = 500, save_csv: bool = False):
     print("PHASE 2 PREVIEW: Data Collection for Offline Analysis")
     print("=" * 60)
     
-    env = LuxEnvironment(render=False, max_ticks=5000)
+    env = LuxEnvironment(render_mode=None, max_ticks=5000)
     obs, _ = env.reset(seed=42)
     
     data = []

@@ -33,16 +33,14 @@ source activate.sh
 
 **Note**: This project uses **UV** package manager. A virtual environment has been pre-configured at `.venv/`.
 
-### 2. Install PyBullet (Required for Phase 1+)
+### 2. Verify Installation
 
-PyBullet failed to build on macOS ARM. Install via conda:
+All dependencies including MuJoCo should already be installed. Verify:
 
 ```bash
-conda install -c conda-forge pybullet
-# Or: mamba install -c conda-forge pybullet
+source activate.sh
+# Should show all packages including mujoco 3.4.0
 ```
-
-See `SETUP.md` for alternative installation methods.
 
 ### 3. Run Phase 1 (Environment Validation)
 
@@ -63,18 +61,18 @@ python main.py --phase=1 --render --steps=500
 # Activate environment first
 source activate.sh
 
-# Run physics engine tests (works without PyBullet!)
+# Run physics engine tests
 pytest tests/test_environment.py::TestLightPhysics -v
 
-# Run all tests (requires PyBullet)
-pytest
+# Run all tests (includes MuJoCo environment tests)
+pytest -v
 
 # Run with coverage
 pytest --cov=src --cov-report=html
 open htmlcov/index.html
 ```
 
-**Note**: Physics engine tests pass without PyBullet. Full environment tests require PyBullet installation.
+**Status**: ✅ All dependencies installed, including MuJoCo 3.4.0 (ARM-native).
 
 ## Implementation Phases
 
@@ -124,7 +122,7 @@ python main.py --phase=3
 ### Three-Layer System
 
 1. **The World (Digital Twin)**
-   - PyBullet physics simulation
+   - MuJoCo physics simulation
    - Hidden ground truth: Inverse Square Law
    - 10m × 10m arena
 

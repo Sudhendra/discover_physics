@@ -6,14 +6,19 @@ This document provides essential information for AI coding agents working on the
 
 **Language**: Python 3.10+  
 **Type**: Scientific simulation with symbolic AI and LLM integration  
-**Core Stack**: PyBullet (physics), PufferLib (vectorization), PySR (symbolic regression), LiteLLM + Google Gemini (reasoning)
+**Core Stack**: MuJoCo (physics), PufferLib (vectorization), PySR (symbolic regression), LiteLLM + Google Gemini (reasoning)
+
+**Physics Engine**: MuJoCo - Free, open-source, excellent macOS ARM support, faster and more accurate than PyBullet
 
 ## Build & Run Commands
 
 ### Setup
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Activate UV environment
+source activate.sh
+
+# Install MuJoCo and dependencies (if not already done)
+uv pip install mujoco mujoco-python-viewer
 
 # Set up environment variables
 cp .env.example .env
@@ -22,10 +27,13 @@ cp .env.example .env
 
 ### Running the Project
 ```bash
+# Activate environment first
+source activate.sh
+
 # Main entry point
 python main.py
 
-# With visualization (PyBullet GUI)
+# With visualization (MuJoCo viewer)
 python main.py --render
 
 # Specific phases
@@ -100,7 +108,7 @@ from typing import Tuple, List, Optional
 
 # Third-party imports
 import numpy as np
-import pybullet as p
+import mujoco
 import gymnasium
 import pufferlib
 import pufferlib.emulation
@@ -204,9 +212,13 @@ def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, dict]
     # Clamp actions to valid range
     action = np.clip(action, -1.0, 1.0)
     
+    # Apply forces to MuJoCo
+    self.data.ctrl[0] = action[0] * 10.0
+    self.data.ctrl[1] = action[1] * 10.0
+    
     # Check for boundary violations
-    pos, _ = p.getBasePositionAndOrientation(self.rover_id)
-    if not (0 <= pos[0] <= 10 and 0 <= pos[1] <= 10):
+    x, y = self.data.qpos[0], self.data.qpos[1]
+    if not (0 <= x <= 10 and 0 <= y <= 10):
         # Handle out-of-bounds
         pass
 ```
@@ -293,22 +305,24 @@ PufferLib expects environments to handle internal resets on episode termination:
 def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, dict]:
     self.tick += 1
     
-    # Apply action and step physics
-    force_x, force_y = action[0] * 10.0, action[1] * 10.0
-    p.applyExternalForce(self.rover_id, -1, [force_x, force_y, 0], [0,0,0], p.WORLD_FRAME)
-    p.stepSimulation()
+    # Apply forces to MuJoCo actuators
+    self.data.ctrl[0] = action[0] * 10.0  # force_x
+    self.data.ctrl[1] = action[1] * 10.0  # force_y
+    
+    # Step MuJoCo physics
+    mujoco.mj_step(self.model, self.data)
     
     obs = self._get_obs()
     reward = 0.0
-    done = self.tick >= self.max_ticks
+    terminated = self.tick >= self.max_ticks
     truncated = False
     
     # Autoreset: Reset internal state when episode ends
-    if done or truncated:
-        # Reset for next episode (keep same PyBullet connection)
-        obs = self.reset()[0]
+    if terminated or truncated:
+        # Reset for next episode (keep same MuJoCo model)
+        obs, _ = self.reset()
     
-    return obs, reward, done, truncated, {}
+    return obs, reward, terminated, truncated, {}
 ```
 
 ### Testing Vectorization
@@ -358,8 +372,9 @@ return {"status": "DATA", "samples": [(x1,y1,lux1), (x2,y2,lux2), ...]}
 Always inject realistic sensor noise to prevent trivial solutions:
 ```python
 def _get_obs(self) -> np.ndarray:
-    pos, _ = p.getBasePositionAndOrientation(self.rover_id)
-    raw_x, raw_y = pos[0], pos[1]
+    # Get position from MuJoCo state
+    raw_x = float(self.data.qpos[0])
+    raw_y = float(self.data.qpos[1])
     
     # Sensor noise: ±1cm for position, ±5% for lux
     obs_x = raw_x + np.random.normal(0, 0.01)
@@ -504,4 +519,5 @@ curiosity:
 - Main design document: `PLAN.md`
 - PySR documentation: https://astroautomata.com/PySR/
 - PufferLib docs: https://github.com/PufferAI/PufferLib
-- PyBullet quickstart: https://docs.google.com/document/d/10sXEhzFRSnvFcl3XxNGhnD4N2SedqwdAvK3dsihxVUA/
+- MuJoCo documentation: https://mujoco.readthedocs.io/
+- MuJoCo Python bindings: https://github.com/google-deepmind/mujoco
