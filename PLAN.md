@@ -1,0 +1,345 @@
+
+## 1. Executive Summary
+
+**Objective:** To construct a "Robot Scientist"—an autonomous agent capable of discovering physical laws (specifically the Inverse Square Law of Light, $I \propto 1/d^2$) in a simulated environment without prior programming of those laws.
+
+**Core Philosophy:** Shift autonomous exploration from **Telemetry-First** (collecting data) to **Knowledge-First** (collecting equations). The agent succeeds only when it transmits a compressed mathematical model that accurately predicts the environment, rather than sending raw sensor logs.
+
+## 2. System Architecture
+
+The system is divided into three distinct layers:
+
+1. **The World (Digital Twin):** A high-fidelity physics simulation (PyBullet + PufferLib) containing the "Hidden Truth."
+    
+2. **The Analyst (Math Engine):** The symbolic regression stack (PySR) that turns data into candidate equations.
+    
+3. **The Commander (LLM):** The cognitive layer that interprets the equations, judges scientific validity, and issues high-level stop/continue commands.
+    
+
+## 3. Module 1: The Environment (Digital Twin)
+
+**Technology Stack:** `PyBullet` (Physics), `PufferLib` (Vectorization/Wrapper), `NumPy`.
+
+The environment is designed as a "Black Box" for the agent. It strictly separates the _Physics Engine_ (Truth) from the _Observation Space_ (Noisy Sensors).
+
+### 3.1 Component: The Truth Engine
+
+This logic represents the laws of nature. It is **inaccessible** to the agent's cognitive stack.
+
+```
+import numpy as np
+import pybullet as p
+
+class LightPhysics:
+    """
+    The 'Hidden Truth' of the universe. 
+    The agent must derive the logic inside 'get_true_lux' via experimentation.
+    """
+    def __init__(self, source_pos=(0, 0), source_intensity=1000.0):
+        self.source_pos = np.array(source_pos)
+        self.source_intensity = source_intensity
+
+    def get_true_lux(self, rover_pos):
+        # The Inverse Square Law: I = S / (4 * pi * r^2)
+        dist_sq = np.sum((rover_pos - self.source_pos)**2)
+        dist_sq = max(dist_sq, 0.01) # Singularity protection
+        return self.source_intensity / (4 * np.pi * dist_sq)
+```
+
+### 3.2 Component: The PufferLib Environment
+
+This class defines the agent's physical embodiment and interface. It handles the robot's kinematics in PyBullet and constructs the noisy observation vector.
+
+**Specifications:**
+
+- **Frequency:** Physics @ 240Hz, Control @ 10Hz (approx).
+    
+- **Arena:** 10m x 10m plane.
+    
+- **Sensors:** Pose ($x, y$ $\pm$ 1cm error), Lux ($I$ $\pm$ 5% error).
+    
+
+```
+import pufferlib
+import pufferlib.emulation
+import gymnasium
+
+class LuxEnvironment:
+    def __init__(self, render=False):
+        # 1. Physics Engine Initialization
+        self.client = p.connect(p.GUI if render else p.DIRECT)
+        self.render_mode = render
+        
+        # 2. Asset Loading
+        # Note: Requires 'plane.urdf' and 'rover.urdf' in local path
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+        self.plane_id = p.loadURDF("plane.urdf")
+        self.rover_id = p.loadURDF("rover.urdf", [5, 5, 0.1])
+        
+        # 3. Internal Truth Instantiation
+        self.truth = LightPhysics(source_pos=(0, 0))
+        
+        # 4. Simulation Constraints
+        self.tick = 0
+        self.max_ticks = 500
+
+    def observation_space(self):
+        # Returns flattened vector: [x, y, lux]
+        # PufferLib requires a Gym Space
+        return gymnasium.spaces.Box(
+            low=np.array([0, 0, 0], dtype=np.float32),
+            high=np.array([10, 10, 5000], dtype=np.float32),
+            shape=(3,),
+            dtype=np.float32
+        )
+
+    def action_space(self):
+        # Continuous force vector: [force_x, force_y]
+        return gymnasium.spaces.Box(
+            low=-1.0, high=1.0, shape=(2,), dtype=np.float32
+        )
+
+    def reset(self, seed=None):
+        # Stochastic reset to prevent overfitting to a specific start path
+        if seed:
+            np.random.seed(seed)
+        start_x = np.random.uniform(1, 9)
+        start_y = np.random.uniform(1, 9)
+        
+        p.resetBasePositionAndOrientation(self.rover_id, [start_x, start_y, 0.1], [0,0,0,1])
+        self.tick = 0
+        return self._get_obs(), {}
+
+    def step(self, action):
+        self.tick += 1
+        
+        # Action -> Force Application
+        # Scaling factor 10.0 converts abstract action to Newtons
+        force_x, force_y = action[0] * 10.0, action[1] * 10.0
+        p.applyExternalForce(
+            self.rover_id, -1, [force_x, force_y, 0], [0,0,0], p.WORLD_FRAME
+        )
+        
+        p.stepSimulation()
+        
+        obs = self._get_obs()
+        
+        # Reward Engineering:
+        # Initially: simple exploration reward (distance covered or new area).
+        # Later Phase: Information Gain (Entropy reduction).
+        reward = 0.0 
+        
+        done = self.tick >= self.max_ticks
+        truncated = False
+        
+        return obs, reward, done, truncated, {}
+
+    def _get_obs(self):
+        # 1. Ground Truth Extraction
+        pos, _ = p.getBasePositionAndOrientation(self.rover_id)
+        raw_x, raw_y = pos[0], pos[1]
+        
+        # 2. Noise Injection (Simulating Sensor Imperfection)
+        obs_x = raw_x + np.random.normal(0, 0.01)
+        obs_y = raw_y + np.random.normal(0, 0.01)
+        
+        true_lux = self.truth.get_true_lux(np.array([raw_x, raw_y]))
+        obs_lux = true_lux * (1 + np.random.normal(0, 0.05))
+        
+        return np.array([obs_x, obs_y, obs_lux], dtype=np.float32)
+```
+
+### 3.3 PufferLib Vectorization
+
+To allow for rapid "mental simulation" or parallel training, we bind the environment using PufferLib's emulation layer.
+
+```
+def make_env():
+    return LuxEnvironment()
+
+# The binding that the Agent will interact with
+env_creator = pufferlib.emulation.PufferEnv(
+    env_creator=make_env,
+)
+```
+
+## 4. Module 2: The Scientist Engine (Onboard Logic)
+
+This module runs "on top" of the environment loop. It is the brain of the rover.
+
+### 4.1 Perception Buffer
+
+A sliding window data structure that stores exploration history.
+
+- **Format:** `List[Tuple[float, float, float]]` -> `[(d1, I1), (d2, I2), ...]`
+    
+- **Preprocessing:** Calculates Euclidean distance from origin (once origin hypothesis is formed) to simplify regression inputs.
+    
+
+### 4.2 Symbolic Discovery Engine
+
+Library: PySR (Python Symbolic Regression).
+
+Role: The "Theorist".
+
+- **Configuration:**
+    
+    - **Binary Operators:** `+, -, *, /`
+        
+    - **Unary Operators:** `square, inverse` (key for finding $1/d^2$)
+        
+    - **Complexity Penalty:** High. We want the simplest elegant equation, not an overfitting polynomial.
+        
+    - **Loss Function:** MSE (Mean Squared Error).
+        
+
+### 4.3 Curiosity Controller (The "Strategist")
+
+**Role:** Determines the `action` passed to `env.step()`.
+
+**Algorithm: Surprise-Based Active Learning**
+
+1. **Predict:** Before moving, use the current best PySR Equation to predict Lux at current location.
+    
+2. **Measure:** Read actual Lux from `obs`.
+    
+3. **Calculate Surprise:** $\Delta = |Pred - Actual|$.
+    
+4. **Decision:**
+    
+    - If $\Delta < Threshold$: Continue Random Walk (Exploration).
+        
+    - If $\Delta > Threshold$: Trigger **Science Mode**. Stop and sample 5 points in a 10cm radius to verify if the anomaly is noise or a new phenomenon. Update PySR model immediately.
+        
+
+## 5. Module 3: The Cognitive Commander (LLM Integration)
+
+**Role:** The LLM does **not** control the rover directly (too slow/costly). Instead, it acts as the **Principal Investigator**. It reviews the output of the Symbolic Regression engine to determine if a "Scientific Discovery" has occurred.
+
+**Stack Choice:** `LiteLLM` (for uniform API calls) + `Google Gemini` (Model Provider). This combination provides a lightweight, dependency-minimal interface ideal for embedded or simulated "onboard" environments.
+
+### 5.1 Technical Integration
+
+- **Trigger Condition:** The LLM is invoked only when `PySR` generates a new "Best Fit" equation with a Complexity Score < 10 and $R^2 > 0.90$.
+    
+- **Input Context:**
+    
+    ```
+    {
+      "current_equation": "y = 800 * (x^-2)",
+      "mse_loss": 0.002,
+      "variables_identified": ["distance", "intensity"],
+      "sample_size": 150
+    }
+    ```
+    
+- **System Prompt:**
+    
+    > "You are an autonomous scientist on a rover. Your math engine has proposed the equation: {current_equation}. Analyze this. Is this a trivial fit (like a polynomial overfitting noise), or does it look like a fundamental physical law? If it looks like a law, output status: DISCOVERY and explain the law in plain English. If not, output status: CONTINUE."
+    
+
+### 5.2 Implementation (LiteLLM + Google Gemini)
+
+We use `litellm` to wrap the Google GenAI SDK, allowing for simple drop-in model switching and simplified response handling.
+
+```
+from litellm import completion
+import os
+
+# Ensure GOOGLE_API_KEY is set in environment
+# os.environ["GEMINI_API_KEY"] = "..." 
+
+def consult_commander(equation, mse):
+    prompt = f"""
+    Equation found: {equation}
+    MSE: {mse}
+    
+    Interpret this. If it looks like an inverse square law (1/x^2) or exponential decay, 
+    mark as SUCCESS. If it looks like random noise fitting or high-order polynomials, mark as CONTINUE.
+    """
+    
+    try:
+        response = completion(
+            model="gemini/gemini-1.5-flash", # Fast, reasoning-capable model
+            messages=[{ "content": prompt,"role": "user"}]
+        )
+        
+        content = response.choices[0].message.content
+        
+        if "SUCCESS" in content:
+            print(f"COMMANDER SIGNAL: {content}")
+            return True # Discovery Confirmed
+            
+    except Exception as e:
+        print(f"Commander Uplink Failed: {e}")
+        
+    return False # Continue mission
+```
+
+## 6. Project Repository Structure
+
+To ensure a clean separation of concerns (Simulation vs. Cognition), the project should follow this directory structure. This organization prevents "Ground Truth" leakage into the Agent's logic.
+
+```
+lux-scientia/
+├── assets/                     # Physical simulation assets
+│   ├── plane.urdf              # The ground plane description
+│   └── rover.urdf              # The robot description
+├── config/                     # Configuration Management
+│   ├── simulation.yaml         # Physics constants (hidden from agent in theory)
+│   └── agent_params.yaml       # PySR hyperparameters, surprise thresholds
+├── src/
+│   ├── environment/            # Module 1: The Digital Twin
+│   │   ├── __init__.py
+│   │   ├── physics_engine.py   # Contains 'LightPhysics' (The Truth)
+│   │   └── puffer_wrapper.py   # Contains 'LuxEnvironment' & PufferLib bindings
+│   ├── agent/                  # Module 2: The Scientist
+│   │   ├── __init__.py
+│   │   ├── perception.py       # Rolling buffer & data preprocessing
+│   │   ├── theorist.py         # PySR integration & Equation management
+│   │   └── navigator.py        # Curiosity Controller & Surprise logic
+│   └── commander/              # Module 3: The LLM Interface
+│       ├── __init__.py
+│       ├── uplink.py           # LiteLLM client wrapper
+│       └── protocols.py        # Prompt templates (Discovery vs. Continue)
+├── main.py                     # Entry point (runs the active learning loop)
+├── requirements.txt            # pybullet, pufferlib, pysr, litellm, google-generativeai
+└── .env                        # GEMINI_API_KEY=...
+```
+
+## 7. Execution Phases
+
+### Phase 1: The Digital Bedrock
+
+- **Task:** Implement `LuxEnvironment` and visualize the rover moving in PyBullet.
+    
+- **Validation:** Manually drive the rover (keyboard input) and log the noisy Lux data to a CSV.
+    
+- **Sanity Check:** Feed this CSV into `PySR` offline to ensure the Inverse Square Law _can_ be recovered from the noisy data.
+    
+
+### Phase 2: The Loop
+
+- **Task:** Close the loop. Connect the PufferLib `step` output to the `Perception Buffer`.
+    
+- **Automation:** Run the simulation with a simple "Random Walk" policy.
+    
+- **Output:** The agent should periodically print "Current Hypothesis: $y = ...$" to the console.
+    
+
+### Phase 3: Active Inference
+
+- **Task:** Implement the Curiosity Controller.
+    
+- **Objective:** Demonstrate that the agent discovers the law **faster** (fewer steps) using Surprise-based navigation than it did with Random Walk.
+    
+
+## 8. Success Criteria
+
+The project is considered a success if:
+
+1. **Discovery:** The Agent outputs a string functionally equivalent to $I = C / d^2$.
+    
+2. **Autonomy:** The discovery happens without human intervention or "ground truth" leakage.
+    
+3. **Generalization:** The derived equation accurately predicts Lux values in visited corners of the map ($R^2 > 0.98$).

@@ -1,0 +1,22 @@
+# Core Dependencies
+numpy>=1.24.0
+pybullet>=3.2.5
+gymnasium>=0.29.0
+
+# PufferLib for vectorization
+pufferlib>=0.7.0
+
+# Symbolic Regression (optional for Phase 1, required for Phase 2+)
+# pysr>=0.16.0
+
+# LLM Integration (optional for Phase 1, required for Phase 3)
+# litellm>=1.0.0
+# google-generativeai>=0.3.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Configuration Management
+pyyaml>=6.0
+python-dotenv>=1.0.0
