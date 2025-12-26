@@ -21,8 +21,8 @@ pysr:
   
 # Curiosity Controller Configuration
 curiosity:
-  surprise_threshold: 0.15  # Threshold for entering Science Mode
-  science_mode_samples: 5   # Number of nearby samples in Science Mode
+  surprise_threshold: 0.20  # Relative error threshold (20%). 4-sigma buffer for 5% sensor noise.
+  science_mode_samples: 3   # Number of nearby samples in Science Mode
   sample_radius: 0.10       # Radius in meters for Science Mode sampling
   min_samples_for_fit: 50   # Minimum buffer size before attempting regression
   

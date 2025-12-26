@@ -89,7 +89,15 @@ class LuxEnvironment(gymnasium.Env):
         """
         xml_string = """
         <mujoco model="lux_rover">
-            <option gravity="0 0 -9.81" timestep="0.01" integrator="RK4"/>
+            <option gravity="0 0 -9.81" timestep="0.01" integrator="RK4">
+                <flag warmstart="enable"/>
+            </option>
+            
+            <default>
+                <geom friction="0.1 0.005 0.0001"/>
+                <!-- Add damping for realistic control -->
+                <joint damping="0.5" armature="0.01"/>
+            </default>
             
             <visual>
                 <global offwidth="1280" offheight="720"/>
@@ -100,8 +108,9 @@ class LuxEnvironment(gymnasium.Env):
                 <light pos="5 5 10" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
                 
                 <!-- Floor centered at (5, 5, 0) to cover [0,10] x [0,10] arena -->
+                <!-- Low friction (0.1) for realistic rover movement -->
                 <geom name="floor" type="plane" size="5 5 0.1" pos="5 5 0" 
-                      rgba="0.9 0.9 0.9 1" friction="0.5 0.005 0.0001"/>
+                      rgba="0.9 0.9 0.9 1" friction="0.1 0.005 0.0001"/>
                 
                 <!-- Visual marker at light source (0, 0) for debugging -->
                 <body name="light_source_marker" pos="0 0 0.05">
@@ -180,12 +189,31 @@ class LuxEnvironment(gymnasium.Env):
         action = np.clip(action, -1.0, 1.0)
         
         # Action -> Force Application
-        # Scaling factor 10.0 converts abstract action to Newtons
-        self.data.ctrl[0] = float(action[0]) * 10.0  # force_x
-        self.data.ctrl[1] = float(action[1]) * 10.0  # force_y
+        # Hybrid strategy: Moderate forces + multi-step + damping for realistic movement
+        # Tuned to: 15N forces, 3 physics steps, 0.1 friction, 0.5 damping
+        # This balances: movement range (good coverage) vs control (stay in arena)
+        self.data.ctrl[0] = float(action[0]) * 15.0  # force_x: -15 to +15 N
+        self.data.ctrl[1] = float(action[1]) * 15.0  # force_y: -15 to +15 N
         
-        # Step MuJoCo physics
-        mujoco.mj_step(self.model, self.data)
+        # Step MuJoCo physics multiple times for momentum buildup
+        # 3 steps @ 0.01s each = 0.03s of force application
+        # With damping, this allows smooth movement without overshooting
+        for _ in range(3):
+            mujoco.mj_step(self.model, self.data)
+        
+        # Soft boundary constraint: Apply restoring force if near edges
+        x, y = float(self.data.qpos[0]), float(self.data.qpos[1])
+        boundary_margin = 0.5  # Start correction 0.5m from edge
+        
+        if x < boundary_margin:
+            self.data.qvel[0] = abs(self.data.qvel[0])  # Bounce back
+        elif x > (10 - boundary_margin):
+            self.data.qvel[0] = -abs(self.data.qvel[0])
+        
+        if y < boundary_margin:
+            self.data.qvel[1] = abs(self.data.qvel[1])
+        elif y > (10 - boundary_margin):
+            self.data.qvel[1] = -abs(self.data.qvel[1])
         
         obs = self._get_obs()
         

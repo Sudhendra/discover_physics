@@ -130,14 +130,23 @@ class Navigator:
     def calculate_surprise(self, predicted: float, actual: float) -> float:
         """Calculate prediction error (surprise metric).
         
+        Uses Relative Error instead of Absolute Error to account for 
+        multiplicative sensor noise (heteroscedasticity).
+        
         Args:
             predicted: Model's predicted lux value
             actual: Observed lux from sensor
             
         Returns:
-            Absolute difference between predicted and actual
+            Relative error: |pred - actual| / (pred + epsilon)
         """
-        return abs(predicted - actual)
+        # Add small epsilon to prevent division by zero
+        epsilon = 1e-6
+        absolute_diff = abs(predicted - actual)
+        # Calculate relative error (scale-invariant)
+        relative_error = absolute_diff / (abs(predicted) + epsilon)
+        
+        return relative_error
     
     def should_enter_science_mode(self, predicted: float, actual: float) -> bool:
         """Determine if anomaly warrants detailed investigation.
