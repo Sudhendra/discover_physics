@@ -211,6 +211,12 @@ def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: boo
         # Take step
         obs, reward, terminated, truncated, info = env.step(action)
         
+        # Calculate Intrinsic Rewards (for monitoring/logging)
+        # This simulates what the PPO agent will optimize in Phase 3
+        coverage_rew = buffer.get_coverage_reward(obs[0], obs[1])
+        intrinsic_rew = navigator.calculate_intrinsic_reward(obs, predicted_lux, coverage_rew)
+        total_reward = reward + intrinsic_rew  # Env Reward (Safety) + Intrinsic (Cognitive)
+        
         # Store observation
         buffer.add_observation(obs)
         
@@ -220,6 +226,7 @@ def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: boo
             print(f"\n  Step {step + 1}/{steps}:")
             print(f"    Buffer: {buffer.size()} samples, Coverage: {coverage:.1f}%")
             print(f"    Position: ({obs[0]:.2f}, {obs[1]:.2f}), Lux: {obs[2]:.2f}")
+            print(f"    Reward: {total_reward:.2f} (Env: {reward:.1f}, Cov: {coverage_rew:.2f}, Curio: {intrinsic_rew-coverage_rew:.2f})")
             
             # Attempt symbolic regression if enough samples
             if buffer.size() >= theorist.min_samples:

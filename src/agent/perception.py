@@ -196,6 +196,34 @@ class PerceptionBuffer:
         visited = np.sum(self.visit_counts > 0)
         total = self.grid_size * self.grid_size
         return float(100.0 * visited / total)
+        
+    def get_coverage_reward(self, x: float, y: float) -> float:
+        """Calculate intrinsic reward for visiting a location.
+        
+        Reward is higher for visiting new cells or less-visited cells.
+        Formula: 1.0 / sqrt(visit_count + 1)
+        
+        Args:
+            x: X position
+            y: Y position
+            
+        Returns:
+            Reward value [0.0, 1.0]
+        """
+        # Convert position to grid cell
+        cell_x = int((x - self.arena_bounds[0]) / (self.arena_bounds[1] - self.arena_bounds[0]) * self.grid_size)
+        cell_y = int((y - self.arena_bounds[0]) / (self.arena_bounds[1] - self.arena_bounds[0]) * self.grid_size)
+        
+        # Clamp to valid range
+        cell_x = np.clip(cell_x, 0, self.grid_size - 1)
+        cell_y = np.clip(cell_y, 0, self.grid_size - 1)
+        
+        # Get current visit count (before this step's update if called before add)
+        # We want the reward for entering this state
+        count = self.visit_counts[cell_x, cell_y]
+        
+        # Inverse square root decay for exploration bonus
+        return float(1.0 / np.sqrt(count + 1.0))
     
     def get_statistics(self) -> dict:
         """Get summary statistics of buffered data.

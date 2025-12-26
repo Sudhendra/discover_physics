@@ -218,9 +218,16 @@ class LuxEnvironment(gymnasium.Env):
         obs = self._get_obs()
         
         # Reward Engineering:
-        # Initially: simple exploration reward (distance covered or new area)
-        # Later Phase: Information Gain (Entropy reduction)
+        # 1. Safety Penalty: Strong negative reward for being near boundaries
+        # This teaches the agent to stay within the safe operating area [0.5, 9.5]
         reward = 0.0
+        
+        # Check boundary proximity (using the same margin as the physical constraints)
+        is_unsafe = (x < boundary_margin) or (x > 10 - boundary_margin) or \
+                    (y < boundary_margin) or (y > 10 - boundary_margin)
+                    
+        if is_unsafe:
+            reward -= 1.0
         
         # Episode termination
         terminated = self.tick >= self.max_ticks

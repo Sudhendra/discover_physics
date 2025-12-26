@@ -230,6 +230,35 @@ class Navigator:
         # Fallback to random walk
         return self._random_walk()
     
+    def calculate_intrinsic_reward(self, observation: Optional[np.ndarray], 
+                                 predicted_lux: Optional[float],
+                                 coverage_reward: float) -> float:
+        """Calculate total intrinsic reward (Curiosity + Coverage).
+        
+        Args:
+            observation: Current [x, y, lux]
+            predicted_lux: Model prediction
+            coverage_reward: Reward from PerceptionBuffer [0.0, 1.0]
+            
+        Returns:
+            Total intrinsic reward scalar
+        """
+        curiosity_reward = 0.0
+        
+        # Calculate Curiosity Reward (Scaled Surprise)
+        if observation is not None and predicted_lux is not None:
+            actual_lux = float(observation[2])
+            surprise = self.calculate_surprise(predicted_lux, actual_lux)
+            
+            # Bonus: 0.5 * RelativeSurprise
+            curiosity_reward = 0.5 * surprise
+            
+        # Combine: Coverage (Exploration) + Curiosity (Science)
+        # Weighting: 1.0 for Coverage (Primary), 0.5 for Curiosity (Secondary)
+        total_reward = coverage_reward + curiosity_reward
+        
+        return total_reward
+    
     def __repr__(self) -> str:
         """String representation."""
         return f"Navigator(mode={self.mode}, science_mode={self.science_mode})"
