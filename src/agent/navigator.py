@@ -39,12 +39,14 @@ class Navigator:
         self.science_samples_remaining = 0
     
     def get_action(self, observation: Optional[np.ndarray] = None, 
-                   predicted_lux: Optional[float] = None) -> np.ndarray:
+                   predicted_lux: Optional[float] = None,
+                   unexplored_direction: Optional[np.ndarray] = None) -> np.ndarray:
         """Get next action based on navigation strategy.
         
         Args:
             observation: Current observation [x, y, lux]
             predicted_lux: Predicted lux from theorist model (for curiosity mode)
+            unexplored_direction: Direction toward unexplored regions (for active learning)
             
         Returns:
             Action array [force_x, force_y] in range [-1, 1]
@@ -53,6 +55,8 @@ class Navigator:
             return self._random_walk()
         elif self.mode == "curious":
             return self._curiosity_driven(observation, predicted_lux)
+        elif self.mode == "active":
+            return self._active_learning(observation, predicted_lux, unexplored_direction)
         else:
             return self._random_walk()
     
@@ -157,10 +161,65 @@ class Navigator:
         """Change navigation mode.
         
         Args:
-            mode: 'random' or 'curious'
+            mode: 'random', 'curious', or 'active'
         """
         self.mode = mode
         self.reset_science_mode()
+    
+    def _active_learning(self, observation: Optional[np.ndarray],
+                        predicted_lux: Optional[float],
+                        unexplored_direction: Optional[np.ndarray]) -> np.ndarray:
+        """Active learning exploration - uncertainty and coverage driven.
+        
+        Combines:
+        1. Surprise-based sampling (like curiosity)
+        2. Coverage-based exploration (toward unexplored regions)
+        
+        Args:
+            observation: Current [x, y, lux]
+            predicted_lux: Model prediction
+            unexplored_direction: Direction toward unexplored cells
+            
+        Returns:
+            Action balancing surprise and coverage
+        """
+        # If in Science Mode (high surprise), sample nearby
+        if self.science_mode:
+            action = self._sample_nearby()
+            self.science_samples_remaining -= 1
+            
+            if self.science_samples_remaining <= 0:
+                self.science_mode = False
+            
+            return action
+        
+        # Check for high surprise
+        if observation is not None and predicted_lux is not None:
+            actual_lux = float(observation[2])
+            surprise = abs(predicted_lux - actual_lux)
+            
+            if surprise > self.surprise_threshold:
+                print(f"  ⚠  Surprise: {surprise:.3f} > {self.surprise_threshold} - Science Mode")
+                self.science_mode = True
+                self.science_samples_remaining = 5
+                return self._sample_nearby()
+        
+        # Otherwise, bias toward unexplored regions
+        if unexplored_direction is not None:
+            # 70% toward unexplored, 30% random for exploration-exploitation balance
+            bias_strength = 0.7
+            random_component = np.random.uniform(-1, 1, size=2).astype(np.float32)
+            biased_action = bias_strength * unexplored_direction + (1 - bias_strength) * random_component
+            
+            # Normalize and clip
+            norm = np.linalg.norm(biased_action)
+            if norm > 0:
+                biased_action = biased_action / norm
+            
+            return np.clip(biased_action, -1.0, 1.0).astype(np.float32)
+        
+        # Fallback to random walk
+        return self._random_walk()
     
     def __repr__(self) -> str:
         """String representation."""

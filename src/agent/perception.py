@@ -26,15 +26,21 @@ class PerceptionBuffer:
         source_hypothesis: Hypothesized light source position (x, y)
     """
     
-    def __init__(self, max_size: int = 1000):
+    def __init__(self, max_size: int = 1000, grid_size: int = 10):
         """Initialize perception buffer.
         
         Args:
             max_size: Maximum buffer size (oldest samples discarded when full)
+            grid_size: Grid resolution for coverage tracking (10 = 10x10 cells)
         """
         self.max_size = max_size
         self.buffer: deque = deque(maxlen=max_size)
         self.source_hypothesis: Optional[np.ndarray] = None
+        
+        # Coverage tracking for active learning
+        self.grid_size = grid_size
+        self.visit_counts = np.zeros((grid_size, grid_size), dtype=np.int32)
+        self.arena_bounds = (0.0, 10.0)  # Arena from [0, 10] x [0, 10]
     
     def add(self, x: float, y: float, lux: float):
         """Add observation to buffer.
@@ -45,6 +51,9 @@ class PerceptionBuffer:
             lux: Light intensity reading
         """
         self.buffer.append((x, y, lux))
+        
+        # Update coverage tracking
+        self._update_coverage(x, y)
     
     def add_observation(self, obs: np.ndarray):
         """Add observation from environment step.
@@ -122,6 +131,71 @@ class PerceptionBuffer:
     def clear(self):
         """Clear all buffered data."""
         self.buffer.clear()
+        self.visit_counts.fill(0)
+    
+    def _update_coverage(self, x: float, y: float):
+        """Update coverage grid with new position.
+        
+        Args:
+            x: X position
+            y: Y position
+        """
+        # Convert position to grid cell
+        cell_x = int((x - self.arena_bounds[0]) / (self.arena_bounds[1] - self.arena_bounds[0]) * self.grid_size)
+        cell_y = int((y - self.arena_bounds[0]) / (self.arena_bounds[1] - self.arena_bounds[0]) * self.grid_size)
+        
+        # Clamp to valid range
+        cell_x = np.clip(cell_x, 0, self.grid_size - 1)
+        cell_y = np.clip(cell_y, 0, self.grid_size - 1)
+        
+        self.visit_counts[cell_x, cell_y] += 1
+    
+    def get_unexplored_direction(self, current_pos: np.ndarray) -> Optional[np.ndarray]:
+        """Get direction toward least-visited region.
+        
+        Args:
+            current_pos: Current position [x, y]
+            
+        Returns:
+            Unit vector toward unexplored region, or None if all explored
+        """
+        if np.all(self.visit_counts > 0):
+            # All cells visited - return None
+            return None
+        
+        # Find least-visited cell
+        min_visits = np.min(self.visit_counts[self.visit_counts >= 0])
+        unvisited_cells = np.argwhere(self.visit_counts == min_visits)
+        
+        if len(unvisited_cells) == 0:
+            return None
+        
+        # Pick random unvisited cell
+        target_cell = unvisited_cells[np.random.randint(len(unvisited_cells))]
+        
+        # Convert cell to world position (cell center)
+        cell_width = (self.arena_bounds[1] - self.arena_bounds[0]) / self.grid_size
+        target_x = self.arena_bounds[0] + (target_cell[0] + 0.5) * cell_width
+        target_y = self.arena_bounds[0] + (target_cell[1] + 0.5) * cell_width
+        
+        # Direction vector
+        direction = np.array([target_x, target_y]) - current_pos[:2]
+        
+        # Normalize
+        norm = np.linalg.norm(direction)
+        if norm > 0:
+            return direction / norm
+        return None
+    
+    def get_coverage_percentage(self) -> float:
+        """Get percentage of arena explored.
+        
+        Returns:
+            Percentage of grid cells visited (0-100)
+        """
+        visited = np.sum(self.visit_counts > 0)
+        total = self.grid_size * self.grid_size
+        return float(100.0 * visited / total)
     
     def get_statistics(self) -> dict:
         """Get summary statistics of buffered data.

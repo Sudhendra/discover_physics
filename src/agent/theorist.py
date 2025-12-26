@@ -54,12 +54,14 @@ class Theorist:
             "unary_operators": ["square", "inv"],
             "complexity_of_operators": {"square": 1, "inv": 1},
             "complexity_of_constants": 1,
-            "parsimony": 0.1,  # High complexity penalty
-            "niterations": 20,  # Fewer iterations for faster testing
-            "populations": 10,
-            "population_size": 30,
-            "maxsize": 15,  # Maximum equation complexity
+            "parsimony": 0.01,  # Lower penalty for better fits
+            "niterations": 40,  # More iterations for convergence
+            "populations": 15,
+            "population_size": 33,
+            "maxsize": 12,  # Slightly lower max complexity
             "verbosity": 0,  # Silent mode
+            "denoise": True,  # Handle noisy data better
+            "model_selection": "best",  # Use best model
         }
     
     def fit(self, distances: np.ndarray, intensities: np.ndarray) -> bool:
@@ -93,14 +95,24 @@ class Theorist:
             model = PySRRegressor(**self.config)
             model.fit(distances.reshape(-1, 1), intensities)
             
-            # Get best equation
+            # Get best equation - use actual R² calculation
             if hasattr(model, 'equations_'):
-                best_idx = model.equations_['score'].idxmax()
+                # Sort by loss (lower is better)
+                best_idx = model.equations_['loss'].idxmin()
                 equation_row = model.equations_.iloc[best_idx]
                 
                 equation_str = str(equation_row['equation'])
-                r_squared = float(equation_row.get('score', 0.0))
+                loss = float(equation_row.get('loss', float('inf')))
                 complexity = int(equation_row.get('complexity', 999))
+                
+                # Calculate actual R² from predictions
+                try:
+                    predictions = model.predict(distances.reshape(-1, 1))
+                    ss_res = np.sum((intensities - predictions) ** 2)
+                    ss_tot = np.sum((intensities - np.mean(intensities)) ** 2)
+                    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+                except Exception:
+                    r_squared = 0.0
                 
                 # Update if this is better than current best
                 if r_squared > self.best_r_squared or \
@@ -111,7 +123,7 @@ class Theorist:
                     self.best_complexity = complexity
                     
                     print(f"\n🔬 New Hypothesis: {equation_str}")
-                    print(f"   R² = {r_squared:.4f}, Complexity = {complexity}")
+                    print(f"   R² = {r_squared:.4f}, Loss = {loss:.6f}, Complexity = {complexity}")
                     
                     return True
             

@@ -138,16 +138,18 @@ def phase2_data_collection(steps: int = 500, save_csv: bool = False):
     return data
 
 
-def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: bool = False):
-    """Phase 2: The Loop - Integrate Scientist Engine.
+def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: bool = False, 
+                          mode: str = "active"):
+    """Phase 2: The Loop - Integrate Scientist Engine with Active Learning.
     
     Connects the perception buffer with PySR symbolic regression.
-    Runs random walk while periodically outputting hypothesis equations.
+    Uses active learning to explore efficiently.
     
     Args:
         steps: Number of simulation steps
         update_freq: Steps between PySR regression updates
         render: Show MuJoCo visualization
+        mode: Navigation mode - 'random', 'active', or 'curious'
     """
     print("=" * 60)
     print("PHASE 2: The Loop - Scientist Engine Integration")
@@ -164,16 +166,22 @@ def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: boo
         print("⚠  No config file, using defaults")
     
     # Initialize components
-    print("\n[1/5] Initializing Scientist Engine...")
+    print(f"\n[1/5] Initializing Scientist Engine (mode={mode})...")
     render_mode = "human" if render else None
     env = LuxEnvironment(render_mode=render_mode, max_ticks=10000)
-    buffer = PerceptionBuffer(max_size=config.get('perception', {}).get('max_buffer_size', 2000))
+    buffer = PerceptionBuffer(
+        max_size=config.get('perception', {}).get('max_buffer_size', 2000),
+        grid_size=10  # 10x10 coverage grid
+    )
     theorist = Theorist(config=config.get('pysr', {}))
-    navigator = Navigator(mode="random")
+    navigator = Navigator(
+        mode=mode,
+        surprise_threshold=config.get('curiosity', {}).get('surprise_threshold', 0.15)
+    )
     
     print(f"  ✓ Environment: MuJoCo (render={'ON' if render else 'OFF'})")
-    print(f"  ✓ Buffer: max_size={buffer.max_size}")
-    print(f"  ✓ Theorist: PySR ready")
+    print(f"  ✓ Buffer: max_size={buffer.max_size}, grid={buffer.grid_size}x{buffer.grid_size}")
+    print(f"  ✓ Theorist: PySR ready (min_samples={theorist.min_samples})")
     print(f"  ✓ Navigator: {navigator.mode} mode")
     
     # Reset environment
@@ -187,8 +195,18 @@ def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: boo
     print(f"\n[3/5] Running {steps} steps with PySR updates every {update_freq} steps...")
     
     for step in range(steps):
-        # Get action from navigator
-        action = navigator.get_action()
+        # Get predicted lux if model exists (for active learning)
+        predicted_lux = None
+        if theorist.model is not None:
+            current_pos = obs[:2]
+            dist = np.linalg.norm(current_pos - np.array([0, 0]))
+            predicted_lux = theorist.predict(dist)
+        
+        # Get direction toward unexplored region
+        unexplored_dir = buffer.get_unexplored_direction(obs)
+        
+        # Get action from navigator (active learning)
+        action = navigator.get_action(obs, predicted_lux, unexplored_dir)
         
         # Take step
         obs, reward, terminated, truncated, info = env.step(action)
@@ -198,8 +216,9 @@ def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: boo
         
         # Periodic updates
         if (step + 1) % update_freq == 0:
+            coverage = buffer.get_coverage_percentage()
             print(f"\n  Step {step + 1}/{steps}:")
-            print(f"    Buffer: {buffer.size()} samples")
+            print(f"    Buffer: {buffer.size()} samples, Coverage: {coverage:.1f}%")
             print(f"    Position: ({obs[0]:.2f}, {obs[1]:.2f}), Lux: {obs[2]:.2f}")
             
             # Attempt symbolic regression if enough samples
@@ -213,6 +232,11 @@ def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: boo
                     summary = theorist.get_hypothesis_summary()
                     print(f"    Current Hypothesis: {summary['equation']}")
                     print(f"    R² = {summary['r_squared']:.4f}, Complexity = {summary['complexity']}")
+                    
+                    # Switch to active mode after first hypothesis
+                    if navigator.mode == "random" and mode == "active":
+                        navigator.set_mode("active")
+                        print(f"    ✓ Switching to active learning mode")
             else:
                 print(f"    Waiting for {theorist.min_samples} samples before PySR...")
         
@@ -281,13 +305,21 @@ def main():
         action='store_true',
         help='Save collected data to CSV'
     )
+    parser.add_argument(
+        '--mode',
+        type=str,
+        default='active',
+        choices=['random', 'active', 'curious'],
+        help='Navigation mode for Phase 2: random, active (coverage+surprise), curious (surprise only)'
+    )
     
     args = parser.parse_args()
     
     if args.phase == 1:
         phase1_visualization(render=args.render, steps=args.steps)
     elif args.phase == 2:
-        phase2_scientist_loop(steps=args.steps, update_freq=args.update_freq, render=args.render)
+        phase2_scientist_loop(steps=args.steps, update_freq=args.update_freq, 
+                             render=args.render, mode=args.mode)
     elif args.phase == 3:
         print("Phase 3 (Active Inference) - Coming soon!")
         print("This will include:")

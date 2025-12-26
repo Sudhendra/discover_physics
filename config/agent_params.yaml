@@ -9,13 +9,15 @@ pysr:
     square: 1
     inv: 1
   complexity_of_constants: 1
-  parsimony: 0.1  # High complexity penalty - prefer simple equations
+  parsimony: 0.01  # Lower penalty for better fits (was 0.1)
   niterations: 40  # Number of evolution iterations
   populations: 15  # Number of populations for genetic algorithm
-  population_size: 50
-  maxsize: 15  # Maximum equation complexity
-  ncycles_per_iteration: 500
+  population_size: 33
+  maxsize: 12  # Maximum equation complexity (was 15)
+  ncycles_per_iteration: 1000  # More cycles for better convergence
   verbosity: 0  # Silent mode (0), or verbose (1)
+  denoise: true  # Handle noisy data better
+  model_selection: "best"  # Use best model
   
 # Curiosity Controller Configuration
 curiosity:
