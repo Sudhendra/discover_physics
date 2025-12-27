@@ -22,6 +22,7 @@ from src.environment.puffer_wrapper import LuxEnvironment
 from src.agent.perception import PerceptionBuffer
 from src.agent.theorist import Theorist
 from src.agent.navigator import Navigator
+from src.commander.uplink import Commander
 
 
 def phase1_visualization(render: bool = True, steps: int = 100):
@@ -278,6 +279,116 @@ def phase2_scientist_loop(steps: int = 1000, update_freq: int = 100, render: boo
     return buffer, theorist
 
 
+def phase3_full_mission(steps: int = 1000, update_freq: int = 100, render: bool = False, 
+                        mode: str = "active"):
+    """Phase 3: The Full Loop - Scientist + Commander.
+    
+    Integrates the Cognitive Commander to validate discoveries.
+    """
+    print("=" * 60)
+    print("PHASE 3: Full Mission - Scientist + Commander")
+    print("=" * 60)
+    
+    # Load configuration
+    config_path = Path("config/agent_params.yaml")
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        print("✓ Loaded configuration")
+    else:
+        config = {}
+        print("⚠  No config file, using defaults")
+    
+    # Initialize components
+    print(f"\n[1/5] Initializing Mission Components...")
+    render_mode = "human" if render else None
+    env = LuxEnvironment(render_mode=render_mode, max_ticks=10000)
+    buffer = PerceptionBuffer(
+        max_size=config.get('perception', {}).get('max_buffer_size', 2000),
+        grid_size=10
+    )
+    theorist = Theorist(config=config.get('pysr', {}))
+    navigator = Navigator(
+        mode=mode,
+        surprise_threshold=config.get('curiosity', {}).get('surprise_threshold', 0.15)
+    )
+    commander = Commander()
+    
+    print(f"  ✓ Environment: MuJoCo (render={'ON' if render else 'OFF'})")
+    print(f"  ✓ Theorist: PySR ready")
+    print(f"  ✓ Navigator: {navigator.mode} mode")
+    print(f"  ✓ Commander: Online ({commander.model_name})")
+    
+    # Reset environment
+    print("\n[2/5] Starting exploration...")
+    obs, _ = env.reset(seed=42)
+    buffer.add_observation(obs)
+    
+    # Main loop
+    print(f"\n[3/5] Running mission...")
+    mission_complete = False
+    
+    for step in range(steps):
+        # --- Active Learning & Navigation ---
+        predicted_lux = None
+        if theorist.model is not None:
+            current_pos = obs[:2]
+            dist = np.linalg.norm(current_pos - np.array([0, 0]))
+            predicted_lux = theorist.predict(dist)
+        
+        unexplored_dir = buffer.get_unexplored_direction(obs)
+        action = navigator.get_action(obs, predicted_lux, unexplored_dir)
+        
+        obs, reward, terminated, truncated, info = env.step(action)
+        buffer.add_observation(obs)
+        
+        # --- Periodic Scientific Review ---
+        if (step + 1) % update_freq == 0:
+            coverage = buffer.get_coverage_percentage()
+            print(f"\n  Step {step + 1}: Cov={coverage:.1f}%")
+            
+            # 1. Attempt Discovery
+            if buffer.size() >= theorist.min_samples:
+                distances, intensities = buffer.get_distance_intensity_pairs(source_pos=(0, 0))
+                success = theorist.fit(distances, intensities)
+                
+                if success:
+                    summary = theorist.get_hypothesis_summary()
+                    print(f"    🔬 Hypothesis: {summary['equation']}")
+                    print(f"       R²={summary['r_squared']:.4f}, C={summary['complexity']}")
+                    
+                    # 2. Consult Commander if Strong Hypothesis
+                    if theorist.has_good_hypothesis(min_r_squared=0.90):
+                        print("    📡 Transmitting to Commander...")
+                        review = commander.review_hypothesis(summary, len(distances))
+                        
+                        print(f"    👮 Commander says: {review['status']}")
+                        print(f"       Reasoning: {review['reasoning']}")
+                        
+                        if review['status'] == "DISCOVERY":
+                            print(f"\n🎉 MISSION SUCCESS! Fundamental Law Discovered.")
+                            print(f"   Final Equation: {summary['equation']}")
+                            mission_complete = True
+                            break
+            else:
+                print(f"    Collecting data ({buffer.size()}/{theorist.min_samples})...")
+                
+        # Small delay if rendering
+        if render:
+            time.sleep(0.01)
+            
+    # Cleanup
+    print("\n[5/5] Mission Report...")
+    env.close()
+    
+    if mission_complete:
+        print("✅ SUCCESS: The robot scientist discovered the law autonomously.")
+    else:
+        print("❌ TIMEOUT: Mission ended without confirmed discovery.")
+    
+    return buffer, theorist
+
+
 def main():
     """Main entry point with phase selection."""
     parser = argparse.ArgumentParser(
@@ -328,11 +439,8 @@ def main():
         phase2_scientist_loop(steps=args.steps, update_freq=args.update_freq, 
                              render=args.render, mode=args.mode)
     elif args.phase == 3:
-        print("Phase 3 (Active Inference) - Coming soon!")
-        print("This will include:")
-        print("  - PySR symbolic regression")
-        print("  - Curiosity-driven exploration")
-        print("  - LLM discovery validation")
+        phase3_full_mission(steps=args.steps, update_freq=args.update_freq,
+                           render=args.render, mode=args.mode)
     else:
         parser.print_help()
 

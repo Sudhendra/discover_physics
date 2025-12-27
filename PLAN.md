@@ -268,11 +268,11 @@ Role: The "Theorist".
     - If $\Delta > Threshold$: Trigger **Science Mode**. Stop and sample 5 points in a 10cm radius to verify if the anomaly is noise or a new phenomenon. Update PySR model immediately.
         
 
-## 5. Module 3: The Cognitive Commander (LLM Integration)
+## 5. Module 3: The Cognitive Commander (LLM Integration) - [COMPLETED]
 
 **Role:** The LLM does **not** control the rover directly (too slow/costly). Instead, it acts as the **Principal Investigator**. It reviews the output of the Symbolic Regression engine to determine if a "Scientific Discovery" has occurred.
 
-**Stack Choice:** `LiteLLM` (for uniform API calls) + `Google Gemini` (Model Provider). This combination provides a lightweight, dependency-minimal interface ideal for embedded or simulated "onboard" environments.
+**Stack Choice:** `LiteLLM` (for uniform API calls) + `OpenAI GPT-4o` (as per implementation details).
 
 ### 5.1 Technical Integration
 
@@ -289,48 +289,11 @@ Role: The "Theorist".
     }
     ```
     
-- **System Prompt:**
-    
-    > "You are an autonomous scientist on a rover. Your math engine has proposed the equation: {current_equation}. Analyze this. Is this a trivial fit (like a polynomial overfitting noise), or does it look like a fundamental physical law? If it looks like a law, output status: DISCOVERY and explain the law in plain English. If not, output status: CONTINUE."
-    
+- **System Prompt:** (Defined in `src/commander/protocols.py`)
 
-### 5.2 Implementation (LiteLLM + Google Gemini)
+### 5.2 Implementation (LiteLLM + OpenAI)
 
-We use `litellm` to wrap the Google GenAI SDK, allowing for simple drop-in model switching and simplified response handling.
-
-```
-from litellm import completion
-import os
-
-# Ensure GOOGLE_API_KEY is set in environment
-# os.environ["GEMINI_API_KEY"] = "..." 
-
-def consult_commander(equation, mse):
-    prompt = f"""
-    Equation found: {equation}
-    MSE: {mse}
-    
-    Interpret this. If it looks like an inverse square law (1/x^2) or exponential decay, 
-    mark as SUCCESS. If it looks like random noise fitting or high-order polynomials, mark as CONTINUE.
-    """
-    
-    try:
-        response = completion(
-            model="gemini/gemini-1.5-flash", # Fast, reasoning-capable model
-            messages=[{ "content": prompt,"role": "user"}]
-        )
-        
-        content = response.choices[0].message.content
-        
-        if "SUCCESS" in content:
-            print(f"COMMANDER SIGNAL: {content}")
-            return True # Discovery Confirmed
-            
-    except Exception as e:
-        print(f"Commander Uplink Failed: {e}")
-        
-    return False # Continue mission
-```
+Implemented in `src/commander/uplink.py`. It uses `litellm` to wrap the API calls.
 
 ## 6. Project Repository Structure
 
@@ -387,8 +350,10 @@ lux-scientia/
 
 ### Phase 3: Active Inference
 
-- **Task:** Implement the Curiosity Controller.
-    
+- **Task:** Implement the Curiosity Controller with Active Learning.
+- **Next Step:** Implement the LLM Commander to validate hypotheses.
+- **Future Optimization:** Replace heuristic Navigator with PPO (Reinforcement Learning) policy trained via PufferLib to maximize the composite reward signal (Safety + Coverage + Curiosity).
+
 - **Objective:** Demonstrate that the agent discovers the law **faster** (fewer steps) using Surprise-based navigation than it did with Random Walk.
     
 

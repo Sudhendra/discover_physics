@@ -509,10 +509,11 @@ curiosity:
 1. **Read PLAN.md first** - Contains complete system design and philosophy
 2. **Preserve information barriers** - Never give agent direct access to LightPhysics
 3. **Test physics offline** - Validate inverse square law discovery with CSV data before full integration
-4. **Start simple** - Implement Phase 1 (visualization), then Phase 2 (loop), then Phase 3 (curiosity)
-5. **Cost-conscious LLM usage** - Only call Gemini when high-confidence equations are found
-6. **Deterministic testing** - Use fixed seeds for reproducible simulation testing
-7. **PufferLib integration** - Wrap environment correctly to enable vectorization for parallel exploration
+4. **Start simple** - Implement Phase 1 (visualization), then Phase 2 (loop), then Phase 3 (curiosity & LLM validation).
+5. **Future Work** - PPO training for navigation is scheduled for a later phase, after the LLM Commander is fully integrated.
+6. **Cost-conscious LLM usage** - Only call Gemini when high-confidence equations are found
+7. **Deterministic testing** - Use fixed seeds for reproducible simulation testing
+8. **PufferLib integration** - Wrap environment correctly to enable vectorization for parallel exploration
 
 ## References
 
